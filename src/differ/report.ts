@@ -4,6 +4,7 @@
  */
 
 import type { ApiChange, SpecDiff } from '../types.js';
+import { looksLikeDifferentApis } from '../specs/vendor.js';
 
 function groupHeading(change: ApiChange): string {
   return change.method === undefined
@@ -46,10 +47,16 @@ export function formatDiffReport(diff: SpecDiff, options: { breakingOnly?: boole
   const safe = options.breakingOnly === true ? [] : diff.changes.filter((change) => !change.breaking);
 
   const lines: string[] = [
-    'APIShift diff',
+    `APIShift diff: ${diff.newTitle}`,
     `  old  ${diff.oldSource} (${diff.oldVersion})`,
     `  new  ${diff.newSource} (${diff.newVersion})`,
     '',
+    ...(looksLikeDifferentApis(diff.oldTitle, diff.newTitle)
+      ? [
+          `  WARNING: these look like different APIs, "${diff.oldTitle}" against "${diff.newTitle}"`,
+          '',
+        ]
+      : []),
     `  ${breaking.length} breaking, ${diff.changes.length - breaking.length} non breaking`,
     '',
   ];

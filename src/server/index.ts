@@ -8,6 +8,8 @@ import { scanCodebase } from '../scanner/index.js';
 import type { ApiChange, Confidence, SpecDiff } from '../types.js';
 import { hasGitHubConfig, loadGitHubConfig } from '../github/config.js';
 import { createGitHubApi, findApishiftPullRequests } from '../github/index.js';
+import { detectVendor, looksLikeDifferentApis } from '../specs/vendor.js';
+import type { Vendor } from '../specs/vendor.js';
 import type { ApishiftPullRequest } from '../github/index.js';
 
 // Pick up .env so the dashboard can show real pull requests without the caller
@@ -39,6 +41,26 @@ interface DiffSummary {
 interface DiffPayload {
   diff: SpecDiff;
   summary: DiffSummary;
+  /** Who the API belongs to, so the preview can look like their product. */
+  vendor: Vendor;
+  /** Set when the two specs look like different APIs entirely. */
+  warning?: string;
+}
+
+/** Identity and a mismatch check, shared by both endpoints. */
+function describeSpecs(diff: SpecDiff): { vendor: Vendor; warning?: string } {
+  const vendor = detectVendor(diff.newTitle, diff.newServer);
+
+  if (looksLikeDifferentApis(diff.oldTitle, diff.newTitle)) {
+    return {
+      vendor,
+      warning:
+        `These look like two different APIs: "${diff.oldTitle}" against "${diff.newTitle}". ` +
+        'Every endpoint of one will report as removed and every endpoint of the other as added.',
+    };
+  }
+
+  return { vendor };
 }
 
 interface AgentPayload extends DiffPayload {
@@ -99,6 +121,7 @@ async function handleDiff(url: URL, response: ServerResponse): Promise<void> {
     const payload: DiffPayload = {
       diff,
       summary: summarizeChanges(diff.changes),
+      ...describeSpecs(diff),
     };
     sendJson(response, 200, payload);
   } catch (error: unknown) {
@@ -130,6 +153,7 @@ async function handleAgent(url: URL, response: ServerResponse): Promise<void> {
     const payload: AgentPayload = {
       diff,
       summary: summarizeChanges(diff.changes),
+      ...describeSpecs(diff),
       repoPath,
       sites: run.sites,
       edits: run.edits,
@@ -809,6 +833,26 @@ export function renderDashboard(): string {
       overflow-wrap: anywhere;
     }
 
+    .spec-warning {
+      border: 1px solid rgba(164, 90, 0, 0.35);
+      background: rgba(164, 90, 0, 0.07);
+      color: var(--amber);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+    }
+
+    /* The brand accent marks the mock as belonging to a vendor. It is a label,
+       not an attempt to reproduce their interface. */
+    .mock-screen .mock-button {
+      background: var(--brand, var(--blue));
+    }
+
+    .mock-screen .mock-toolbar strong {
+      border-left: 3px solid var(--brand, var(--blue));
+      padding-left: 8px;
+    }
+
     .pr-live {
       display: grid;
       gap: 6px;
@@ -1470,6 +1514,7 @@ export function renderDashboard(): string {
       </section>
 
       <section class="results" aria-label="Diff results">
+        <div class="spec-warning" id="specWarning" role="status" hidden></div>
         <div class="result-head">
           <h2>Changes</h2>
           <div class="meta" id="meta">Waiting for a diff</div>
@@ -1712,14 +1757,38 @@ export function renderDashboard(): string {
       return found;
     }
 
+    /**
+     * The vendor for the diff on screen. The preview is a mockup of YOUR app
+     * against their API, not a replica of their product, so it borrows the
+     * brand accent and name and nothing else.
+     */
+    var currentVendor = { name: 'this API', accent: '#2457d6', domain: 'generic', recognized: false };
+
+    var SCREEN_BY_DOMAIN = {
+      payments: 'Checkout screen',
+      messaging: 'Message view',
+      music: 'Player screen',
+      code: 'Repository view',
+      observability: 'Incident view',
+      infrastructure: 'Resource view',
+      ai: 'Completion view',
+      generic: 'Customer app'
+    };
+
     function appTitle(change) {
       const path = change.path.toLowerCase();
+      const screen = SCREEN_BY_DOMAIN[currentVendor.domain] || 'Customer app';
+
+      // A recognised vendor names the integration, so it is obvious whose API
+      // this is without pretending to be their own site.
+      if (currentVendor.recognized) return 'Your ' + currentVendor.name + ' integration';
+
       if (path.includes('drive')) return 'File manager';
       if (path.includes('blog')) return 'Blog dashboard';
       if (path.includes('analytics') || path.includes('management')) return 'Analytics dashboard';
       if (path.includes('charge') || path.includes('payment') || path.includes('balance')) return 'Payments dashboard';
       if (path.includes('account')) return 'Account settings';
-      return 'Customer app';
+      return screen;
     }
 
     function firstToken(tokens, fallback) {
@@ -2081,6 +2150,7 @@ export function renderDashboard(): string {
     function mockScreen(model, phase) {
       const screen = document.createElement('div');
       screen.className = 'mock-screen';
+      screen.style.setProperty('--brand', currentVendor.accent);
 
       const toolbar = document.createElement('div');
       toolbar.className = 'mock-toolbar';
@@ -2370,6 +2440,7 @@ export function renderDashboard(): string {
     }
 
     function renderAgent(payload) {
+      if (payload.vendor) currentVendor = payload.vendor;
       const applied = payload.edits.filter((edit) => edit.action === 'apply');
       const review = payload.edits.filter((edit) => edit.action === 'review');
 
@@ -2399,10 +2470,13 @@ export function renderDashboard(): string {
     }
 
     function renderPayload(payload) {
+      if (payload.vendor) currentVendor = payload.vendor;
+      showWarning(payload.warning);
       setCounts(payload.summary);
       setOverview(payload);
       const generated = new Date(payload.diff.generatedAt).toLocaleString();
-      meta.textContent = payload.diff.oldVersion + ' -> ' + payload.diff.newVersion + ' / ' + generated;
+      const who = payload.vendor && payload.vendor.name ? payload.vendor.name + ' / ' : '';
+      meta.textContent = who + payload.diff.oldVersion + ' -> ' + payload.diff.newVersion + ' / ' + generated;
 
       results.className = 'change-list';
       results.replaceChildren(...payload.diff.changes.map(renderChange));
@@ -2515,6 +2589,19 @@ export function renderDashboard(): string {
     demoButton.addEventListener('click', () => {
       loadPreset(presets.demo);
     });
+
+    const specWarning = document.querySelector('#specWarning');
+
+    /** Say plainly when the two specs are not the same API. */
+    function showWarning(message) {
+      if (!message) {
+        specWarning.hidden = true;
+        specWarning.textContent = '';
+        return;
+      }
+      specWarning.hidden = false;
+      specWarning.textContent = message;
+    }
 
     const prLive = document.querySelector('#prLive');
 

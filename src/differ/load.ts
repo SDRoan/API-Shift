@@ -11,6 +11,8 @@ export interface LoadedSpec {
   source: string;
   title: string;
   version: string;
+  /** First declared server, which is the one clients actually call. */
+  primaryServer?: string | undefined;
   document: OpenAPIV3.Document;
 }
 
@@ -53,10 +55,13 @@ export async function loadSpec(source: string | OpenAPI.Document): Promise<Loade
     );
   }
 
+  const primaryServer = document.servers?.[0]?.url;
+
   return {
     source: label,
     title: document.info?.title ?? 'untitled api',
     version: document.info?.version ?? 'unknown',
+    ...(primaryServer !== undefined ? { primaryServer } : {}),
     document,
   };
 }

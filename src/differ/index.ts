@@ -36,6 +36,10 @@ export function diffLoadedSpecs(
     newVersion: after.version,
     oldSource: before.source,
     newSource: after.source,
+    oldTitle: before.title,
+    newTitle: after.title,
+    ...(before.primaryServer !== undefined ? { oldServer: before.primaryServer } : {}),
+    ...(after.primaryServer !== undefined ? { newServer: after.primaryServer } : {}),
     generatedAt: now().toISOString(),
     changes: diffModels(buildSpecModel(before.document), buildSpecModel(after.document)),
   };

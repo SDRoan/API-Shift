@@ -85,6 +85,12 @@ export interface SpecDiff {
   newVersion: string;
   oldSource: string;
   newSource: string;
+  /** The API's own name for itself, from info.title. */
+  oldTitle: string;
+  newTitle: string;
+  /** Primary server URL, which identifies the vendor better than any label. */
+  oldServer?: string | undefined;
+  newServer?: string | undefined;
   generatedAt: string;
   changes: ApiChange[];
 }
