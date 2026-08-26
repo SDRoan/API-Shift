@@ -1,0 +1,167 @@
+openapi: 3.0.3
+info:
+  title: Acme Payments API
+  version: 2.0.0
+servers:
+  - url: https://api.acme.test
+
+# What changed from 1.0.0, and why each one is here:
+#   mechanical  /v1/charges renamed to /v1/payments
+#   mechanical  amount renamed to amount_cents, in both request and response
+#   ambiguous   Charge.currency changed from a string code to an integer code
+#   ambiguous   a new required Idempotency-Key header appeared
+#   safe        a new optional receipt_url field and a new endpoint
+paths:
+  /v1/payments:
+    post:
+      operationId: createCharge
+      summary: Create a payment
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount_cents, currency, source]
+              properties:
+                amount_cents:
+                  type: integer
+                  description: Charge amount in the smallest currency unit
+                currency:
+                  type: string
+                source:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: The created payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Charge'
+
+    get:
+      operationId: listCharges
+      summary: List payments
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: starting_after
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of payments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Charge'
+                  has_more:
+                    type: boolean
+
+  /v1/payments/{chargeId}:
+    get:
+      operationId: getCharge
+      summary: Fetch one payment
+      parameters:
+        - name: chargeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Charge'
+
+  /v1/payment_methods:
+    get:
+      operationId: listPaymentMethods
+      summary: List stored payment methods
+      responses:
+        '200':
+          description: A page of payment methods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        brand:
+                          type: string
+
+  /v1/refunds:
+    post:
+      operationId: createRefund
+      summary: Refund a charge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [charge]
+              properties:
+                charge:
+                  type: string
+                amount:
+                  type: integer
+      responses:
+        '200':
+          description: The created refund
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  status:
+                    type: string
+
+components:
+  schemas:
+    Charge:
+      type: object
+      required: [id, amount_cents, currency, status]
+      properties:
+        id:
+          type: string
+        amount_cents:
+          type: integer
+        currency:
+          type: integer
+        status:
+          type: string
+          enum: [pending, succeeded, failed, refunded]
+        description:
+          type: string
+        receipt_url:
+          type: string

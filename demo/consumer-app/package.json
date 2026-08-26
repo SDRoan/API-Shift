@@ -1,0 +1,13 @@
+{
+  "name": "acme-checkout",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A small service that charges customers through the Acme Payments API.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}
