@@ -99,6 +99,26 @@ There is also a local dashboard:
 npm run localhost   # http://127.0.0.1:3000
 ```
 
+## Hosted, spec diff only
+
+There is a second, deliberately smaller program for public hosting:
+
+```bash
+npm run public   # or: docker build -t apishift . && docker run -p 8080:8080 apishift
+```
+
+It serves one page where anyone pastes two spec URLs. It has no filesystem
+access, no repository scanning, and no GitHub token, because none of that
+belongs on a public endpoint. Those routes are absent rather than disabled.
+
+A URL supplied by a visitor is a request your server makes on their behalf, so
+it only fetches public http and https, refusing loopback, private ranges, and
+cloud metadata addresses. Specs are capped in size, fetched under a timeout, and
+parsed with external `$ref` resolution turned off so a hostile spec cannot make
+the server fetch anything else.
+
+Deploy it free with the included `Dockerfile` and `render.yaml`.
+
 ## If your code wraps the API
 
 Most codebases do not call `fetch` directly. They wrap it once:
@@ -156,7 +176,7 @@ That found three bugs fixtures never would have:
 
 Five runtime dependencies: `@apidevtools/swagger-parser`, `openapi-types`, `ts-morph`, `@octokit/rest`, `better-sqlite3`. Argument parsing uses Node's `util.parseArgs` and env loading uses `process.loadEnvFile`, so the CLI adds nothing of its own. The dashboard is plain `node:http` with no framework and no build step.
 
-275 tests. The differ and scanner are pure so they test against fixtures with no mocks, GitHub is tested against a fake client, and one test compiles the JavaScript the dashboard actually serves.
+283 tests. The differ and scanner are pure so they test against fixtures with no mocks, GitHub is tested against a fake client, and one test compiles the JavaScript the dashboard actually serves.
 
 Full design and reasoning in [DESIGN.md](DESIGN.md).
 

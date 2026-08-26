@@ -22,6 +22,8 @@ export { compareChanges, sortChanges } from './changes.js';
 export interface DiffOptions {
   /** Injected in tests so snapshots do not move. Defaults to now. */
   now?: () => Date;
+  /** Passed through to loadSpec. A public endpoint disables external refs. */
+  allowExternalRefs?: boolean | undefined;
 }
 
 export function diffLoadedSpecs(
@@ -51,6 +53,7 @@ export async function diffSpecs(
   newSource: string | OpenAPI.Document,
   options: DiffOptions = {},
 ): Promise<SpecDiff> {
-  const [before, after] = await Promise.all([loadSpec(oldSource), loadSpec(newSource)]);
+  const load = { allowExternalRefs: options.allowExternalRefs };
+  const [before, after] = await Promise.all([loadSpec(oldSource, load), loadSpec(newSource, load)]);
   return diffLoadedSpecs(before, after, options);
 }

@@ -18,7 +18,9 @@
     "test:watch": "vitest",
     "apishift": "npm run build --silent && node dist/cli/index.js",
     "demo": "npm run build --silent && node --env-file=.env dist/cli/index.js fix demo/consumer-app --old demo/specs/v1.yaml --new demo/specs/v2.yaml --open-pr",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "public": "npm run build --silent && node dist/server/public.js",
+    "start": "node dist/server/public.js"
   },
   "keywords": [
     "openapi",

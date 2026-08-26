@@ -36,14 +36,34 @@ function isOpenApiV3(document: OpenAPI.Document): document is OpenAPIV3.Document
  * `source` may be a local file path, a URL, or an already parsed document, which
  * is what tests use.
  */
-export async function loadSpec(source: string | OpenAPI.Document): Promise<LoadedSpec> {
+export interface LoadSpecOptions {
+  /**
+   * Whether `$ref` may point at another file or URL.
+   *
+   * On by default, since real specs use it. A public endpoint must turn it off:
+   * the URL was supplied by a stranger, and a spec that references
+   * http://169.254.169.254/ would otherwise make the server fetch it, walking
+   * straight past every guard on the original URL.
+   */
+  allowExternalRefs?: boolean | undefined;
+}
+
+export async function loadSpec(
+  source: string | OpenAPI.Document,
+  options: LoadSpecOptions = {},
+): Promise<LoadedSpec> {
   const label = typeof source === 'string' ? source : 'inline document';
 
   let document: OpenAPI.Document;
   try {
     // Clone, because dereference mutates the document it is given.
     const input = typeof source === 'string' ? source : structuredClone(source);
-    document = await SwaggerParser.dereference(input);
+    document = await SwaggerParser.dereference(
+      input,
+      options.allowExternalRefs === false
+        ? { resolve: { external: false } }
+        : {},
+    );
   } catch (error: unknown) {
     throw new SpecLoadError(label, error);
   }
