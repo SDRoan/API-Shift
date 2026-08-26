@@ -15,6 +15,8 @@ import { describeHttpCall, httpCallsIn } from './http.js';
 import type { HttpCall } from './http.js';
 import { localFieldReads, payloadBindingsOf, propertyReferences, propertySignatureOf } from './dataflow.js';
 import { matchSpecPath, rewritePath, urlShapeOf } from './url.js';
+import { EMPTY_CONFIG, loadScannerConfig } from './config.js';
+import type { ScannerConfig } from './config.js';
 
 export interface ScannedSite extends CallSite {
   absoluteFile: string;
@@ -41,6 +43,13 @@ export interface ScanResult {
 }
 
 const MAX_SNIPPET = 120;
+
+/**
+ * Config for the scan in progress. The strategies below all need it and it
+ * never varies within a run, so it is set once rather than threaded through
+ * every signature.
+ */
+let activeConfig: ScannerConfig = EMPTY_CONFIG;
 
 function snippetOf(node: Node): string {
   const text = node.getText().replace(/\s+/g, ' ').trim();
@@ -92,7 +101,7 @@ function makeSite(input: SiteInput): ScannedSite {
 function callMatchesOperation(httpCall: HttpCall, change: ApiChange): boolean {
   const shape = urlShapeOf(httpCall.urlArgument);
   if (shape === undefined) return false;
-  if (matchSpecPath(shape, change.path) === undefined) return false;
+  if (matchSpecPath(shape, change.path, activeConfig.baseUrl) === undefined) return false;
 
   // When both sides state a method, they have to agree. A call whose method we
   // cannot read is still allowed through, since the URL already matched.
@@ -114,7 +123,7 @@ function scanPathRename(change: ApiChange, file: SourceFile, root: string): Scan
   if (from === undefined || to === undefined) return [];
 
   const sites: ScannedSite[] = [];
-  for (const httpCall of httpCallsIn(file)) {
+  for (const httpCall of httpCallsIn(file, activeConfig)) {
     const urlNode = httpCall.urlArgument;
     if (urlNode === undefined) continue;
     if (!callMatchesOperation(httpCall, change)) continue;
@@ -148,7 +157,7 @@ function scanRequestFieldRename(change: ApiChange, file: SourceFile, root: strin
   if (from === undefined || to === undefined) return [];
 
   const sites: ScannedSite[] = [];
-  for (const httpCall of httpCallsIn(file)) {
+  for (const httpCall of httpCallsIn(file, activeConfig)) {
     if (httpCall.payload === undefined) continue;
     if (!callMatchesOperation(httpCall, change)) continue;
 
@@ -228,7 +237,7 @@ function scanResponseFieldRename(change: ApiChange, file: SourceFile, root: stri
     );
   };
 
-  for (const httpCall of httpCallsIn(file)) {
+  for (const httpCall of httpCallsIn(file, activeConfig)) {
     if (!callMatchesOperation(httpCall, change)) continue;
 
     for (const binding of payloadBindingsOf(httpCall)) {
@@ -263,7 +272,7 @@ function scanReviewOnly(change: ApiChange, file: SourceFile, root: string): Scan
   const sites: ScannedSite[] = [];
   const field = leafName(change.target?.from ?? change.target?.to);
 
-  for (const httpCall of httpCallsIn(file)) {
+  for (const httpCall of httpCallsIn(file, activeConfig)) {
     if (!callMatchesOperation(httpCall, change)) continue;
 
     // Request side changes anchor at the call, since that is where a value would
@@ -375,7 +384,10 @@ function deduplicate(sites: ScannedSite[]): ScannedSite[] {
   const byKey = new Map<string, ScannedSite>();
 
   for (const site of sites) {
-    const key = `${site.changeId}:${site.absoluteFile}:${site.start}:${site.end}`;
+    // Keyed without the change id on purpose. Two endpoints sharing a response
+    // type produce a site each on the very same property, with the very same
+    // message, and a reader has one line to fix rather than two.
+    const key = `${site.absoluteFile}:${site.start}:${site.end}:${site.reason}`;
     const existing = byKey.get(key);
     // Keep the entry that can actually fix something.
     if (existing === undefined || (existing.replacement === undefined && site.replacement !== undefined)) {
@@ -390,6 +402,7 @@ function deduplicate(sites: ScannedSite[]): ScannedSite[] {
 
 export function scanProject(root: string, changes: ApiChange[]): ScanResult {
   const loaded = loadProject(root);
+  activeConfig = loadScannerConfig(root);
   const sites: ScannedSite[] = [];
 
   for (const change of changes) {

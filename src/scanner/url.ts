@@ -102,8 +102,20 @@ export function literalPrefixOf(specPath: string): string {
  * matches `${BASE}/v1/charges` but not `/v1/charges/{id}`, and a proxy prefix
  * like `/api/v1/charges` still matches.
  */
-export function matchSpecPath(shape: UrlShape, specPath: string): UrlMatch | undefined {
-  const urlPath = stripOrigin(pathPortionOf(shape.text));
+export function matchSpecPath(
+  shape: UrlShape,
+  specPath: string,
+  baseUrl?: string | undefined,
+): UrlMatch | undefined {
+  let text = pathPortionOf(shape.text);
+
+  // A client that stores its base URL separately leaves it in the literal, so
+  // strip the one the project declared before matching.
+  if (baseUrl !== undefined && baseUrl.length > 0 && text.startsWith(baseUrl)) {
+    text = text.slice(baseUrl.length);
+  }
+
+  const urlPath = stripOrigin(text);
   const urlSegments = segmentsOf(urlPath);
   const specSegments = segmentsOf(specPath);
 

@@ -99,6 +99,33 @@ There is also a local dashboard:
 npm run localhost   # http://127.0.0.1:3000
 ```
 
+## If your code wraps the API
+
+Most codebases do not call `fetch` directly. They wrap it once:
+
+```ts
+export function createCharge(amount: number) {
+  return request('POST', '/v1/charges', { amount, currency: 'usd' });
+}
+```
+
+The path is right there, but as the second argument of a function APIShift has
+never heard of, so a scan finds nothing. Drop an `apishift.json` at your repo
+root naming the wrapper:
+
+```json
+{
+  baseUrl: https://api.acme.test,
+  requestFunctions: [
+    { name: request, methodArgument: 0, urlArgument: 1, bodyArgument: 2 }
+  ]
+}
+```
+
+On the fixture in this repo that takes the scan from **0 affected locations to
+7**, patching both URLs, the payload field, the interface, and every reader,
+and the result still compiles under `strict`.
+
 ## Tested against real specs, not just fixtures
 
 GitHub Enterprise, OpenAI, Stripe, Adyen, Twilio, PagerDuty, Sentry, Discord, Box, Asana, Plaid, Datadog, DigitalOcean.
@@ -112,7 +139,7 @@ That found three bugs fixtures never would have:
 ## Honest limits
 
 - **OpenAPI 3.x only.** Swagger 2.0 is rejected with a clear message.
-- **TypeScript and JavaScript only**, and it recognises `fetch`, `axios`, and client methods matched by operation id. A generated SDK where the path never appears in your source is invisible to it.
+- **TypeScript and JavaScript only.** It recognises `fetch`, `axios`, and any wrapper you declare in `apishift.json`. A generated SDK where the path never appears anywhere in your source is still invisible to it.
 - **Union internals.** `oneOf<3>` to `oneOf<4>` reports that a union widened, not what is inside the new member.
 - **Multi file specs** need every referenced file to resolve from the same base, so raw commit URLs will not work for them.
 
@@ -129,7 +156,7 @@ That found three bugs fixtures never would have:
 
 Five runtime dependencies: `@apidevtools/swagger-parser`, `openapi-types`, `ts-morph`, `@octokit/rest`, `better-sqlite3`. Argument parsing uses Node's `util.parseArgs` and env loading uses `process.loadEnvFile`, so the CLI adds nothing of its own. The dashboard is plain `node:http` with no framework and no build step.
 
-263 tests. The differ and scanner are pure so they test against fixtures with no mocks, GitHub is tested against a fake client, and one test compiles the JavaScript the dashboard actually serves.
+275 tests. The differ and scanner are pure so they test against fixtures with no mocks, GitHub is tested against a fake client, and one test compiles the JavaScript the dashboard actually serves.
 
 Full design and reasoning in [DESIGN.md](DESIGN.md).
 

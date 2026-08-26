@@ -11,6 +11,8 @@
 import { Node, SyntaxKind } from 'ts-morph';
 import type { CallExpression, Expression, ObjectLiteralExpression, SourceFile } from 'ts-morph';
 import type { HttpMethod } from '../types.js';
+import { EMPTY_CONFIG } from './config.js';
+import type { RequestFunctionConfig, ScannerConfig } from './config.js';
 
 const AXIOS_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'request']);
 
@@ -79,9 +81,60 @@ function methodFromConfig(config: ObjectLiteralExpression | undefined): HttpMeth
  *   axios({ url, method, data })
  *   client.get(url)
  */
-export function describeHttpCall(call: CallExpression): HttpCall | undefined {
+/**
+ * A wrapper the project declared in apishift.json.
+ *
+ * Matched on the callee text, so a plain function and a method both work, and
+ * the URL comes from whichever argument the project said holds it.
+ */
+function describeConfiguredCall(
+  call: CallExpression,
+  rule: RequestFunctionConfig,
+): HttpCall | undefined {
+  const args = call.getArguments();
+  const urlArgument = args[rule.urlArgument] as Expression | undefined;
+  if (urlArgument === undefined) return undefined;
+
+  const payload =
+    rule.bodyArgument === undefined
+      ? undefined
+      : objectLiteralOf(unwrapJsonStringify(args[rule.bodyArgument] as Expression | undefined));
+
+  let method: HttpMethod | undefined;
+  if (rule.methodArgument !== undefined) {
+    const declared = args[rule.methodArgument];
+    if (
+      declared !== undefined &&
+      (Node.isStringLiteral(declared) || Node.isNoSubstitutionTemplateLiteral(declared))
+    ) {
+      method = asMethod(declared.getLiteralText());
+    }
+  }
+
+  return {
+    call,
+    urlArgument,
+    config: undefined,
+    payload,
+    method,
+    recognizedCallee: true,
+  };
+}
+
+export function describeHttpCall(
+  call: CallExpression,
+  config: ScannerConfig = EMPTY_CONFIG,
+): HttpCall | undefined {
   const callee = call.getExpression();
   const args = call.getArguments();
+
+  // A declared wrapper wins, since the project knows its own code better than
+  // any heuristic here does.
+  const rule = config.requestFunctions.find((candidate) => candidate.name === callee.getText());
+  if (rule !== undefined) {
+    const described = describeConfiguredCall(call, rule);
+    if (described !== undefined) return described;
+  }
   const first = args[0]?.asKind(SyntaxKind.ObjectLiteralExpression) ?? args[0];
 
   // axios({ url, method, data }) and any single config object call.
@@ -136,9 +189,9 @@ export function describeHttpCall(call: CallExpression): HttpCall | undefined {
 }
 
 /** Every call in a file that looks like it might be an HTTP call. */
-export function httpCallsIn(file: SourceFile): HttpCall[] {
+export function httpCallsIn(file: SourceFile, config: ScannerConfig = EMPTY_CONFIG): HttpCall[] {
   return file
     .getDescendantsOfKind(SyntaxKind.CallExpression)
-    .map((call) => describeHttpCall(call))
+    .map((call) => describeHttpCall(call, config))
     .filter((call): call is HttpCall => call !== undefined);
 }

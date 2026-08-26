@@ -1,0 +1,6 @@
+{
+  "baseUrl": "https://api.acme.test",
+  "requestFunctions": [
+    { "name": "request", "methodArgument": 0, "urlArgument": 1, "bodyArgument": 2 }
+  ]
+}

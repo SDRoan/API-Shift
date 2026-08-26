@@ -18,6 +18,7 @@
 import { Node, SyntaxKind } from 'ts-morph';
 import type {
   Identifier,
+  Type,
   InterfaceDeclaration,
   PropertySignature,
   TypeAliasDeclaration,
@@ -88,8 +89,16 @@ function jsonDecodeCallsFrom(references: Identifier[]): Node[] {
  * it, but only when that declaration lives in this repo. A type from
  * node_modules is not ours to rewrite.
  */
+/**
+ * Unwrap a Promise, so a wrapper declared as Promise<Charge> resolves to the
+ * Charge it eventually produces.
+ */
+function awaitedType(type: Type): Type {
+  return type.getSymbol()?.getName() === 'Promise' ? type.getTypeArguments()[0] ?? type : type;
+}
+
 function typeDeclarationOfNode(node: Node): PayloadTypeDeclaration | undefined {
-  const type = node.getType();
+  const type = awaitedType(node.getType());
   const symbol = type.getSymbol() ?? type.getAliasSymbol();
   const target = symbol
     ?.getDeclarations()
@@ -112,7 +121,15 @@ function typeDeclarationOfNode(node: Node): PayloadTypeDeclaration | undefined {
  */
 export function payloadBindingsOf(httpCall: HttpCall): PayloadBinding[] {
   const direct = declarationReceiving(httpCall.call);
-  if (direct === undefined) return [];
+
+  // A wrapper is usually returned straight out rather than bound to a
+  // variable: `return request('GET', '/v1/charges')`. There is no binding to
+  // follow, but the declared return type still names the payload, which is
+  // all a rename needs.
+  if (direct === undefined) {
+    const declared = typeDeclarationOfNode(httpCall.call);
+    return declared === undefined ? [] : [{ declaration: undefined, typeDeclaration: declared }];
+  }
 
   const bindings: PayloadBinding[] = [];
   const record = (declaration: VariableDeclaration): void => {
