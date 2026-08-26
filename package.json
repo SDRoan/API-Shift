@@ -1,0 +1,44 @@
+{
+  "name": "apishift",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dependabot for API changes. Diffs OpenAPI specs, finds broken call sites, and opens a pull request that patches them.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "apishift": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "localhost": "npm run build --silent && node dist/server/index.js",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "apishift": "npm run build --silent && node dist/cli/index.js",
+    "demo": "npm run build --silent && node --env-file=.env dist/cli/index.js fix demo/consumer-app --old demo/specs/v1.yaml --new demo/specs/v2.yaml --open-pr"
+  },
+  "keywords": [
+    "openapi",
+    "breaking-changes",
+    "codemod",
+    "ts-morph"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@apidevtools/swagger-parser": "^12.1.0",
+    "@octokit/rest": "^22.0.1",
+    "better-sqlite3": "^13.0.3",
+    "openapi-types": "^12.1.3",
+    "ts-morph": "^28.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
