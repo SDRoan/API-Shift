@@ -1,8 +1,7 @@
 {
   "name": "apishift",
   "version": "0.1.0",
-  "private": true,
-  "description": "Dependabot for API changes. Diffs OpenAPI specs, finds broken call sites, and opens a pull request that patches them.",
+  "description": "Dependabot for API changes. Diffs OpenAPI specs, finds the call sites that break with ts-morph, and opens a pull request that patches them.",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -18,7 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "apishift": "npm run build --silent && node dist/cli/index.js",
-    "demo": "npm run build --silent && node --env-file=.env dist/cli/index.js fix demo/consumer-app --old demo/specs/v1.yaml --new demo/specs/v2.yaml --open-pr"
+    "demo": "npm run build --silent && node --env-file=.env dist/cli/index.js fix demo/consumer-app --old demo/specs/v1.yaml --new demo/specs/v2.yaml --open-pr",
+    "prepare": "npm run build"
   },
   "keywords": [
     "openapi",
@@ -40,5 +40,15 @@
     "@vitest/coverage-v8": "^4.1.10",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SDRoan/API-Shift.git"
+  },
+  "files": [
+    "dist",
+    "DESIGN.md",
+    "README.md",
+    ".env.example"
+  ]
 }

@@ -131,12 +131,27 @@ async function handleDiff(url: URL, response: ServerResponse): Promise<void> {
   }
 }
 
+/**
+ * Resolve the repo to scan.
+ *
+ * This used to refuse anything outside the APIShift checkout, which made the
+ * dashboard a demo: you could not point it at the repo you actually work on.
+ * The server binds to loopback and only ever reads, so any local path is fine.
+ *
+ * Set APISHIFT_SCAN_ROOT to confine it again, which is what you want if you
+ * ever expose this beyond your own machine.
+ */
 function resolveCodebasePath(repoPath: string): string {
-  const workspace = resolve(process.cwd());
   const absolute = resolve(process.cwd(), repoPath);
-  if (absolute !== workspace && !absolute.startsWith(`${workspace}/`)) {
-    throw new Error('codebase path must stay inside this APIShift workspace');
+  const confineTo = process.env['APISHIFT_SCAN_ROOT'];
+
+  if (confineTo !== undefined && confineTo.length > 0) {
+    const root = resolve(confineTo);
+    if (absolute !== root && !absolute.startsWith(`${root}/`)) {
+      throw new Error(`codebase path must stay inside ${root}, set by APISHIFT_SCAN_ROOT`);
+    }
   }
+
   return absolute;
 }
 

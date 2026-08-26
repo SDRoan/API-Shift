@@ -1,0 +1,40 @@
+# Fail the build when a vendor ships a breaking API change.
+#
+# `apishift diff` exits 1 when it finds one, so this needs no extra scripting.
+# Point it at whichever spec you depend on, pinned against the version you
+# currently build against.
+name: API contract check
+
+on:
+  schedule:
+    # Vendors ship on their schedule, not yours, so check daily.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check the vendor spec for breaking changes
+        run: |
+          npx github:SDRoan/API-Shift diff \
+            "${{ vars.APISHIFT_OLD_SPEC }}" \
+            "${{ vars.APISHIFT_NEW_SPEC }}"
+
+      # Swap the step above for this to also scan your code and open a PR.
+      # - name: Patch affected call sites and open a pull request
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #     GITHUB_OWNER: ${{ github.repository_owner }}
+      #     GITHUB_REPO: ${{ github.event.repository.name }}
+      #   run: |
+      #     npx github:SDRoan/API-Shift fix . \
+      #       --old "${{ vars.APISHIFT_OLD_SPEC }}" \
+      #       --new "${{ vars.APISHIFT_NEW_SPEC }}" \
+      #       --open-pr
