@@ -833,6 +833,27 @@ export function renderDashboard(): string {
       overflow-wrap: anywhere;
     }
 
+    .endpoint-list {
+      margin-top: 10px;
+      border-top: 1px solid var(--line);
+      padding-top: 8px;
+    }
+
+    .endpoint-list > summary {
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .endpoint-items {
+      display: grid;
+      gap: 4px;
+      margin-top: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
     .spec-warning {
       border: 1px solid rgba(164, 90, 0, 0.35);
       background: rgba(164, 90, 0, 0.07);
@@ -2265,6 +2286,14 @@ export function renderDashboard(): string {
       return preview;
     }
 
+    /** One row per distinct change, carrying the endpoints it touches. */
+    function renderGroupedChange(group) {
+      const card = renderChange(group.representative);
+      const endpoints = renderEndpoints(group);
+      if (endpoints) card.append(endpoints);
+      return card;
+    }
+
     function renderChange(change) {
       const item = document.createElement('article');
       item.className = 'change';
@@ -2469,6 +2498,76 @@ export function renderDashboard(): string {
       agentPanel.hidden = false;
     }
 
+    /** Leaf of a dotted pointer, so entries[].fields[].type becomes type. */
+    function leafOf(pointer) {
+      if (!pointer) return '';
+      const parts = String(pointer).split('.');
+      return (parts[parts.length - 1] || '').split('[]').join('');
+    }
+
+    /**
+     * Two changes are the same fact when they say the same thing about the same
+     * field. A vendor editing one shared schema produces a record per endpoint
+     * that references it, so Box adding one enum value appeared seven times.
+     */
+    function groupKeyOf(change) {
+      const target = change.target || {};
+      const from = leafOf(target.from);
+      const to = leafOf(target.to);
+
+      let detail = change.detail || '';
+      if (target.from && from) detail = detail.split(target.from).join(from);
+      if (target.to && to) detail = detail.split(target.to).join(to);
+
+      return [change.kind, change.direction || '', change.breaking ? 'b' : 's', from, to,
+        target.fromType || '', target.toType || '', detail].join('|');
+    }
+
+    function endpointLabelOf(change) {
+      return change.method ? change.method.toUpperCase() + ' ' + change.path : change.path;
+    }
+
+    function groupChangesForDisplay(changes) {
+      const byKey = new Map();
+
+      for (const change of changes) {
+        const key = groupKeyOf(change);
+        const existing = byKey.get(key);
+        if (!existing) {
+          byKey.set(key, { representative: change, changes: [change], endpoints: [endpointLabelOf(change)] });
+          continue;
+        }
+        existing.changes.push(change);
+        const label = endpointLabelOf(change);
+        if (existing.endpoints.indexOf(label) === -1) existing.endpoints.push(label);
+      }
+
+      return Array.from(byKey.values());
+    }
+
+    /** The endpoint line for a group: one endpoint, or a count you can expand. */
+    function renderEndpoints(group) {
+      if (group.endpoints.length === 1) return null;
+
+      const wrap = document.createElement('details');
+      wrap.className = 'endpoint-list';
+
+      const summary = document.createElement('summary');
+      summary.textContent = group.endpoints.length + ' endpoints affected';
+      wrap.append(summary);
+
+      const list = document.createElement('div');
+      list.className = 'endpoint-items';
+      for (const endpoint of group.endpoints) {
+        const item = document.createElement('div');
+        item.textContent = endpoint;
+        list.append(item);
+      }
+
+      wrap.append(list);
+      return wrap;
+    }
+
     function renderPayload(payload) {
       if (payload.vendor) currentVendor = payload.vendor;
       showWarning(payload.warning);
@@ -2476,10 +2575,15 @@ export function renderDashboard(): string {
       setOverview(payload);
       const generated = new Date(payload.diff.generatedAt).toLocaleString();
       const who = payload.vendor && payload.vendor.name ? payload.vendor.name + ' / ' : '';
-      meta.textContent = who + payload.diff.oldVersion + ' -> ' + payload.diff.newVersion + ' / ' + generated;
+      const groupCount = groupChangesForDisplay(payload.diff.changes).length;
+      const shared = groupCount < payload.diff.changes.length
+        ? ' / ' + groupCount + ' distinct'
+        : '';
+      meta.textContent = who + payload.diff.oldVersion + ' -> ' + payload.diff.newVersion + shared + ' / ' + generated;
 
       results.className = 'change-list';
-      results.replaceChildren(...payload.diff.changes.map(renderChange));
+      const grouped = groupChangesForDisplay(payload.diff.changes);
+      results.replaceChildren(...grouped.map(renderGroupedChange));
 
       if (payload.diff.changes.length === 0) {
         results.className = 'empty';

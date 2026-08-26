@@ -5,6 +5,7 @@
 
 import type { ApiChange, SpecDiff } from '../types.js';
 import { looksLikeDifferentApis } from '../specs/vendor.js';
+import { groupChanges } from './group.js';
 
 function groupHeading(change: ApiChange): string {
   return change.method === undefined
@@ -23,22 +24,39 @@ function describe(change: ApiChange): string {
   return change.detail;
 }
 
-function renderGroup(changes: ApiChange[], indent = '  '): string[] {
-  const groups = new Map<string, ApiChange[]>();
-  for (const change of changes) {
-    const heading = groupHeading(change);
-    groups.set(heading, [...(groups.get(heading) ?? []), change]);
-  }
+/** How many endpoints to name before summarising the rest. */
+const MAX_LISTED_ENDPOINTS = 4;
 
+/**
+ * One entry per distinct change rather than per endpoint.
+ *
+ * A vendor editing one shared schema produces a record for every endpoint that
+ * references it, so Box adding a single enum value appeared seven times. The
+ * records are all real and the scanner needs them, but a reader wants the fact
+ * once with the endpoints it touches.
+ */
+function renderGroup(changes: ApiChange[], indent = '  '): string[] {
   const lines: string[] = [];
-  for (const [heading, group] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
-    lines.push(`${indent}${heading}`);
-    for (const change of group) {
-      lines.push(`${indent}  ${change.kind}  [${change.confidence}]`);
-      lines.push(`${indent}    ${describe(change)}`);
+
+  for (const group of groupChanges(changes)) {
+    const change = group.representative;
+    const shared = group.endpoints.length > 1;
+
+    lines.push(`${indent}${shared ? `${group.endpoints.length} endpoints` : groupHeading(change)}`);
+    lines.push(`${indent}  ${change.kind}  [${change.confidence}]`);
+    lines.push(`${indent}    ${describe(change)}`);
+
+    if (shared) {
+      for (const endpoint of group.endpoints.slice(0, MAX_LISTED_ENDPOINTS)) {
+        lines.push(`${indent}      ${endpoint}`);
+      }
+      const rest = group.endpoints.length - MAX_LISTED_ENDPOINTS;
+      if (rest > 0) lines.push(`${indent}      and ${rest} more`);
     }
+
     lines.push('');
   }
+
   return lines;
 }
 
@@ -58,6 +76,9 @@ export function formatDiffReport(diff: SpecDiff, options: { breakingOnly?: boole
         ]
       : []),
     `  ${breaking.length} breaking, ${diff.changes.length - breaking.length} non breaking`,
+    ...(groupChanges(diff.changes).length < diff.changes.length
+      ? [`  ${groupChanges(diff.changes).length} distinct changes, some shared across endpoints`]
+      : []),
     '',
   ];
 
