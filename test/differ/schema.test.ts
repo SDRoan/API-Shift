@@ -33,9 +33,18 @@ describe('typeName', () => {
     expect(typeName({ $ref: '#/components/schemas/Thing' })).toBe('unknown');
   });
 
-  it('does not pick a branch for oneOf or anyOf', () => {
-    expect(typeName({ oneOf: [{ type: 'string' }, { type: 'integer' }] })).toBe('oneOf<2>');
-    expect(typeName({ anyOf: [{ type: 'string' }] })).toBe('anyOf<1>');
+  it('names union members rather than just counting them', () => {
+    // oneOf<3> to oneOf<4> tells you nothing. Naming members says what appeared.
+    expect(typeName({ oneOf: [{ type: 'string' }, { type: 'integer' }] })).toBe('oneOf<2: integer|string>');
+    expect(typeName({ anyOf: [{ type: 'string' }] })).toBe('anyOf<1: string>');
+  });
+
+  it('falls back to a count when a union is too wide to read', () => {
+    // Twenty distinct member names would spell out past any readable length.
+    const wide: OpenAPIV3.SchemaObject = {
+      oneOf: Array.from({ length: 20 }, (_, index) => ({ type: 'string', format: 'fmt' + index }) as OpenAPIV3.SchemaObject),
+    };
+    expect(typeName(wide)).toBe('oneOf<20>');
   });
 });
 

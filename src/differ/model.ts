@@ -54,10 +54,26 @@ export interface OperationModel {
   requestFields: FieldModel[];
   responseFields: FieldModel[];
   responseStatuses: string[];
+  /** Marked for removal by the vendor. A warning rather than a break. */
+  deprecated: boolean;
+  /** Security requirement names, resolved from the operation or the document. */
+  security: string[];
+  /** True when the operation declares its own security rather than inheriting. */
+  hasOwnSecurity: boolean;
+  /** Media types the request body accepts. */
+  requestContentTypes: string[];
+  /** Media types the success response produces. */
+  responseContentTypes: string[];
 }
 
 export interface SpecModel {
   operations: Map<string, OperationModel>;
+  /** Base URLs, in declaration order. */
+  servers: string[];
+  /** Document level security requirement names. */
+  security: string[];
+  /** Scheme name to a comparable description of how it authenticates. */
+  securitySchemes: Map<string, string>;
 }
 
 export function operationKey(method: HttpMethod, path: string): string {
@@ -111,11 +127,23 @@ function flattenSchema(
   }
 }
 
-function jsonSchemaOf(content: OpenAPIV3.RequestBodyObject['content'] | undefined): OpenAPIV3.SchemaObject | undefined {
+/**
+ * The schema a caller actually works with.
+ *
+ * JSON is preferred, but an API that only speaks form encoding or XML still has
+ * a schema worth diffing. Ignoring those operations entirely meant a form based
+ * API reported no field changes at all.
+ */
+function payloadSchemaOf(
+  content: OpenAPIV3.RequestBodyObject['content'] | undefined,
+): OpenAPIV3.SchemaObject | undefined {
   if (content === undefined) return undefined;
+
   const mediaType =
     content['application/json'] ??
-    Object.entries(content).find(([type]) => type.includes('json'))?.[1];
+    Object.entries(content).find(([type]) => type.includes('json'))?.[1] ??
+    Object.entries(content).sort(([a], [b]) => a.localeCompare(b))[0]?.[1];
+
   return asSchema(mediaType?.schema);
 }
 
@@ -124,7 +152,7 @@ function requestFieldsOf(operation: OpenAPIV3.OperationObject): FieldModel[] {
   if (requestBody === undefined) return [];
 
   const fields: FieldModel[] = [];
-  flattenSchema(jsonSchemaOf(requestBody.content), '', 0, new Set(), fields);
+  flattenSchema(payloadSchemaOf(requestBody.content), '', 0, new Set(), fields);
   return fields;
 }
 
@@ -150,7 +178,7 @@ function responseFieldsOf(operation: OpenAPIV3.OperationObject): FieldModel[] {
   const found = successResponse(operation);
   if (found === undefined) return [];
   const fields: FieldModel[] = [];
-  flattenSchema(jsonSchemaOf(found[1].content), '', 0, new Set(), fields);
+  flattenSchema(payloadSchemaOf(found[1].content), '', 0, new Set(), fields);
   return fields;
 }
 
@@ -181,9 +209,47 @@ function paramsOf(
   return [...byKey.values()];
 }
 
+/** Requirement names, for example ["apiKey", "oauth2"]. */
+function securityNames(
+  requirements: OpenAPIV3.SecurityRequirementObject[] | undefined,
+): string[] {
+  if (requirements === undefined) return [];
+  return [...new Set(requirements.flatMap((requirement) => Object.keys(requirement)))].sort();
+}
+
+/**
+ * A comparable description of a security scheme. Comparing the whole object
+ * would report cosmetic edits, so this keeps only what a caller has to act on.
+ */
+function describeScheme(scheme: OpenAPIV3.SecuritySchemeObject): string {
+  switch (scheme.type) {
+    case 'apiKey':
+      return `apiKey in ${scheme.in} named ${scheme.name}`;
+    case 'http':
+      return `http ${scheme.scheme}`;
+    case 'oauth2':
+      return `oauth2 flows ${Object.keys(scheme.flows ?? {}).sort().join(', ')}`;
+    case 'openIdConnect':
+      return `openIdConnect ${scheme.openIdConnectUrl}`;
+    default:
+      return 'unknown scheme';
+  }
+}
+
+function contentTypesOf(content: OpenAPIV3.RequestBodyObject['content'] | undefined): string[] {
+  return content === undefined ? [] : Object.keys(content).sort();
+}
+
 /** Build the comparable model for one dereferenced document. */
 export function buildSpecModel(document: OpenAPIV3.Document): SpecModel {
   const operations = new Map<string, OperationModel>();
+  const documentSecurity = securityNames(document.security);
+
+  const securitySchemes = new Map<string, string>();
+  for (const [name, raw] of Object.entries(document.components?.securitySchemes ?? {})) {
+    const scheme = raw as OpenAPIV3.SecuritySchemeObject | undefined;
+    if (scheme !== undefined && 'type' in scheme) securitySchemes.set(name, describeScheme(scheme));
+  }
 
   for (const [path, rawItem] of Object.entries(document.paths ?? {})) {
     const item = rawItem as OpenAPIV3.PathItemObject | undefined;
@@ -192,6 +258,9 @@ export function buildSpecModel(document: OpenAPIV3.Document): SpecModel {
     for (const method of HTTP_METHODS) {
       const operation = item[method];
       if (operation === undefined) continue;
+
+      const requestBody = operation.requestBody as OpenAPIV3.RequestBodyObject | undefined;
+      const success = successResponse(operation);
 
       operations.set(operationKey(method, path), {
         key: operationKey(method, path),
@@ -202,9 +271,20 @@ export function buildSpecModel(document: OpenAPIV3.Document): SpecModel {
         requestFields: requestFieldsOf(operation),
         responseFields: responseFieldsOf(operation),
         responseStatuses: Object.keys(operation.responses ?? {}).sort(),
+        deprecated: operation.deprecated === true,
+        // An operation with its own security overrides the document level one.
+        security: operation.security !== undefined ? securityNames(operation.security) : documentSecurity,
+        hasOwnSecurity: operation.security !== undefined,
+        requestContentTypes: contentTypesOf(requestBody?.content),
+        responseContentTypes: contentTypesOf(success?.[1].content),
       });
     }
   }
 
-  return { operations };
+  return {
+    operations,
+    servers: (document.servers ?? []).map((server) => server.url),
+    security: documentSecurity,
+    securitySchemes,
+  };
 }

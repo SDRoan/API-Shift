@@ -19,6 +19,11 @@ function operation(partial: Partial<OperationModel> & { path: string }): Operati
     requestFields: [],
     responseFields: [],
     responseStatuses: ['200'],
+    deprecated: false,
+    security: [],
+    hasOwnSecurity: false,
+    requestContentTypes: [],
+    responseContentTypes: [],
     ...partial,
   };
 }

@@ -36,10 +36,23 @@ export type ChangeKind =
   | 'response.field.renamed'
   | 'response.field.type.changed'
   | 'response.status.removed'
+  /** The base URL moved. Catastrophic and otherwise invisible. */
+  | 'server.url.changed'
+  | 'server.removed'
+  | 'server.added'
+  /** Authentication requirements moved. */
+  | 'security.added'
+  | 'security.removed'
+  | 'security.scheme.changed'
+  /** An early warning, not yet a break. */
+  | 'operation.deprecated'
+  /** A request or response media type appeared or disappeared. */
+  | 'content.type.removed'
+  | 'content.type.added'
   | 'enum.value.removed'
   | 'enum.value.added';
 
-export type ChangeLocation = 'path' | 'query' | 'header' | 'body' | 'response';
+export type ChangeLocation = 'path' | 'query' | 'header' | 'body' | 'response' | 'server' | 'security';
 
 /** What moved, for renames and type changes. */
 export interface ChangeTarget {

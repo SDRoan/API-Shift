@@ -430,10 +430,50 @@ function diffOperation(
     confidence,
   };
 
+  const deprecation: ApiChange[] =
+    !from.deprecated && to.deprecated
+      ? [
+          makeChange({
+            kind: 'operation.deprecated',
+            // Not broken yet, which is exactly why it is worth knowing now.
+            breaking: false,
+            confidence,
+            path: from.path,
+            method: from.method,
+            operationId: from.operationId,
+            detail: `${from.method.toUpperCase()} ${from.path} is now deprecated`,
+          }),
+        ]
+      : [];
+
+  const security: ApiChange[] = [];
+  // Only report here when the operation declares its own security. Inherited
+  // requirements are already covered by the document level change, and saying
+  // it twice is the same fact reported as two problems.
+  const gained = to.hasOwnSecurity ? to.security.filter((name) => !from.security.includes(name)) : [];
+  if (gained.length > 0) {
+    security.push(
+      makeChange({
+        kind: 'security.added',
+        breaking: true,
+        confidence,
+        path: from.path,
+        method: from.method,
+        operationId: from.operationId,
+        target: { location: 'security', to: gained.join(', ') },
+        detail: `now requires ${gained.join(', ')}`,
+      }),
+    );
+  }
+
   return [
+    ...deprecation,
+    ...security,
     ...diffParams(context, from.params, to.params),
     ...diffFields(context, 'request', from.requestFields, to.requestFields),
     ...diffFields(context, 'response', from.responseFields, to.responseFields),
+    ...diffContentTypes(context, 'request', from.requestContentTypes, to.requestContentTypes),
+    ...diffContentTypes(context, 'response', from.responseContentTypes, to.responseContentTypes),
     ...diffStatuses(context, from.responseStatuses, to.responseStatuses),
   ];
 }
@@ -471,8 +511,174 @@ function pathRenameChanges(pairs: { from: OperationModel; to: OperationModel; co
   });
 }
 
-export function diffModels(oldModel: SpecModel, newModel: SpecModel): ApiChange[] {
+/**
+ * Base URL changes.
+ *
+ * A vendor moving its host is a total outage for every caller, and it is the
+ * kind of change a schema focused diff misses entirely because no path or field
+ * moved. Compared positionally, since servers[0] is the one clients use.
+ */
+function diffServers(from: string[], to: string[]): ApiChange[] {
   const changes: ApiChange[] = [];
+
+  const primaryBefore = from[0];
+  const primaryAfter = to[0];
+  if (primaryBefore !== undefined && primaryAfter !== undefined && primaryBefore !== primaryAfter) {
+    changes.push(
+      makeChange({
+        kind: 'server.url.changed',
+        breaking: true,
+        confidence: 'high',
+        path: primaryBefore,
+        target: { location: 'server', from: primaryBefore, to: primaryAfter },
+        detail: `base URL changed from ${primaryBefore} to ${primaryAfter}`,
+      }),
+    );
+  }
+
+  const after = new Set(to);
+  for (const url of from) {
+    if (after.has(url) || url === primaryBefore) continue;
+    changes.push(
+      makeChange({
+        kind: 'server.removed',
+        breaking: true,
+        confidence: 'high',
+        path: url,
+        target: { location: 'server', from: url },
+        detail: `server ${url} removed`,
+      }),
+    );
+  }
+
+  const before = new Set(from);
+  for (const url of to) {
+    if (before.has(url) || url === primaryAfter) continue;
+    changes.push(
+      makeChange({
+        kind: 'server.added',
+        breaking: false,
+        confidence: 'high',
+        path: url,
+        target: { location: 'server', to: url },
+        detail: `server ${url} added`,
+      }),
+    );
+  }
+
+  return changes;
+}
+
+/**
+ * Authentication changes. A new requirement breaks every existing caller, and a
+ * scheme that changes how it authenticates breaks them just as hard.
+ */
+function diffSecurity(oldModel: SpecModel, newModel: SpecModel): ApiChange[] {
+  const changes: ApiChange[] = [];
+  const before = new Set(oldModel.security);
+  const after = new Set(newModel.security);
+
+  for (const name of after) {
+    if (before.has(name)) continue;
+    changes.push(
+      makeChange({
+        kind: 'security.added',
+        breaking: true,
+        confidence: 'high',
+        path: '/',
+        target: { location: 'security', to: name },
+        detail: `new security requirement ${name}, existing callers will be rejected`,
+      }),
+    );
+  }
+
+  for (const name of before) {
+    if (after.has(name)) continue;
+    changes.push(
+      makeChange({
+        kind: 'security.removed',
+        breaking: false,
+        confidence: 'high',
+        path: '/',
+        target: { location: 'security', from: name },
+        detail: `security requirement ${name} removed`,
+      }),
+    );
+  }
+
+  for (const [name, description] of oldModel.securitySchemes) {
+    const updated = newModel.securitySchemes.get(name);
+    if (updated === undefined || updated === description) continue;
+    changes.push(
+      makeChange({
+        kind: 'security.scheme.changed',
+        breaking: true,
+        confidence: 'high',
+        path: '/',
+        target: { location: 'security', from: name, to: name, fromType: description, toType: updated },
+        detail: `security scheme ${name} changed from ${description} to ${updated}`,
+      }),
+    );
+  }
+
+  return changes;
+}
+
+/** Media types a request or response gained or lost. */
+function diffContentTypes(
+  context: OperationContext,
+  direction: Direction,
+  from: string[],
+  to: string[],
+): ApiChange[] {
+  const changes: ApiChange[] = [];
+  const after = new Set(to);
+  const before = new Set(from);
+  const location = direction === 'request' ? 'body' : 'response';
+
+  for (const type of from) {
+    if (after.has(type)) continue;
+    changes.push(
+      makeChange({
+        kind: 'content.type.removed',
+        // Losing the only way you know how to send or read a payload breaks you.
+        breaking: true,
+        confidence: context.confidence,
+        direction,
+        path: context.path,
+        method: context.method,
+        operationId: context.operationId,
+        target: { location, from: type },
+        detail: `${direction} no longer accepts ${type}`,
+      }),
+    );
+  }
+
+  for (const type of to) {
+    if (before.has(type)) continue;
+    changes.push(
+      makeChange({
+        kind: 'content.type.added',
+        breaking: false,
+        confidence: context.confidence,
+        direction,
+        path: context.path,
+        method: context.method,
+        operationId: context.operationId,
+        target: { location, to: type },
+        detail: `${direction} now also accepts ${type}`,
+      }),
+    );
+  }
+
+  return changes;
+}
+
+export function diffModels(oldModel: SpecModel, newModel: SpecModel): ApiChange[] {
+  const changes: ApiChange[] = [
+    ...diffServers(oldModel.servers, newModel.servers),
+    ...diffSecurity(oldModel, newModel),
+  ];
 
   const removed: OperationModel[] = [];
   const added: OperationModel[] = [];

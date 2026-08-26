@@ -49,6 +49,21 @@ export function resolveAllOf(schema: OpenAPIV3.SchemaObject): OpenAPIV3.SchemaOb
   return merged;
 }
 
+/** Above this many characters a spelled out union stops being readable. */
+const MAX_UNION_LABEL = 60;
+
+function unionName(keyword: string, members: MaybeSchema[]): string {
+  // The member count always stays in the name. Distinct names alone would hide
+  // a real change: PagerDuty widening a union from three object variants to
+  // four collapses to the single name 'object', so without the count the change
+  // disappears entirely.
+  const distinct = [...new Set(members.map((member) => typeName(member)))].sort();
+  const label = distinct.join('|');
+  return label.length <= MAX_UNION_LABEL
+    ? `${keyword}<${members.length}: ${label}>`
+    : `${keyword}<${members.length}>`;
+}
+
 /**
  * A stable, comparable name for a schema's type. Format is included because
  * string:date-time to string is a real contract change a consumer can trip on.
@@ -59,8 +74,11 @@ export function typeName(schema: MaybeSchema): string {
 
   const resolved = resolveAllOf(concrete);
 
-  if (Array.isArray(resolved.oneOf)) return `oneOf<${resolved.oneOf.length}>`;
-  if (Array.isArray(resolved.anyOf)) return `anyOf<${resolved.anyOf.length}>`;
+  // Naming the members turns "oneOf<3> to oneOf<4>" into a change you can read.
+  // Very wide unions fall back to a count, since the full list stops being
+  // legible in a report.
+  if (Array.isArray(resolved.oneOf)) return unionName('oneOf', resolved.oneOf);
+  if (Array.isArray(resolved.anyOf)) return unionName('anyOf', resolved.anyOf);
 
   // OpenAPI 3.1 allows a type array, for example ['string', 'null'].
   const rawType: unknown = resolved.type;
@@ -86,6 +104,12 @@ const NUMERIC_FORMATS = new Set(['int32', 'int64', 'float', 'double']);
 export function splitTypeName(name: string): { base: string; format: string | undefined } {
   const separator = name.indexOf(':');
   if (separator === -1) return { base: name, format: undefined };
+
+  // A colon inside a composite label belongs to a member, not to this type.
+  // oneOf<string:date-time|integer> must not split into base 'oneOf<string'.
+  const bracket = name.indexOf('<');
+  if (bracket !== -1 && bracket < separator) return { base: name, format: undefined };
+
   return { base: name.slice(0, separator), format: name.slice(separator + 1) };
 }
 
