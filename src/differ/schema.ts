@@ -52,12 +52,18 @@ export function resolveAllOf(schema: OpenAPIV3.SchemaObject): OpenAPIV3.SchemaOb
 /** Above this many characters a spelled out union stops being readable. */
 const MAX_UNION_LABEL = 60;
 
-function unionName(keyword: string, members: MaybeSchema[]): string {
+function unionName(keyword: string, members: MaybeSchema[], depth: number): string {
+  // Naming members means recursing into them, and a union nested inside a union
+  // inside an array recurses without bound. Cloudflare's 2164 path spec
+  // overflowed the stack on this. Past the depth cap the count alone is still
+  // a faithful, comparable name.
+  if (depth >= MAX_SCHEMA_DEPTH) return `${keyword}<${members.length}>`;
+
   // The member count always stays in the name. Distinct names alone would hide
   // a real change: PagerDuty widening a union from three object variants to
   // four collapses to the single name 'object', so without the count the change
   // disappears entirely.
-  const distinct = [...new Set(members.map((member) => typeName(member)))].sort();
+  const distinct = [...new Set(members.map((member) => typeName(member, depth + 1)))].sort();
   const label = distinct.join('|');
   return label.length <= MAX_UNION_LABEL
     ? `${keyword}<${members.length}: ${label}>`
@@ -68,7 +74,7 @@ function unionName(keyword: string, members: MaybeSchema[]): string {
  * A stable, comparable name for a schema's type. Format is included because
  * string:date-time to string is a real contract change a consumer can trip on.
  */
-export function typeName(schema: MaybeSchema): string {
+export function typeName(schema: MaybeSchema, depth = 0): string {
   const concrete = asSchema(schema);
   if (concrete === undefined) return 'unknown';
 
@@ -77,8 +83,8 @@ export function typeName(schema: MaybeSchema): string {
   // Naming the members turns "oneOf<3> to oneOf<4>" into a change you can read.
   // Very wide unions fall back to a count, since the full list stops being
   // legible in a report.
-  if (Array.isArray(resolved.oneOf)) return unionName('oneOf', resolved.oneOf);
-  if (Array.isArray(resolved.anyOf)) return unionName('anyOf', resolved.anyOf);
+  if (Array.isArray(resolved.oneOf)) return unionName('oneOf', resolved.oneOf, depth);
+  if (Array.isArray(resolved.anyOf)) return unionName('anyOf', resolved.anyOf, depth);
 
   // OpenAPI 3.1 allows a type array, for example ['string', 'null'].
   const rawType: unknown = resolved.type;
@@ -86,7 +92,7 @@ export function typeName(schema: MaybeSchema): string {
 
   if (rawType === 'array') {
     const items = 'items' in resolved ? resolved.items : undefined;
-    return `array<${typeName(items)}>`;
+    return `array<${typeName(items, depth + 1)}>`;
   }
 
   if (rawType === undefined) return resolved.properties !== undefined ? 'object' : 'unknown';

@@ -39,6 +39,18 @@ describe('typeName', () => {
     expect(typeName({ anyOf: [{ type: 'string' }] })).toBe('anyOf<1: string>');
   });
 
+  it('survives a union nested inside a union, however deep', () => {
+    // Naming members means recursing into them. Cloudflare's 2164 path spec
+    // overflowed the stack here, since nothing capped the descent.
+    let nested: OpenAPIV3.SchemaObject = { type: 'string' };
+    for (let level = 0; level < 200; level += 1) {
+      nested = { oneOf: [{ type: 'array', items: nested } as OpenAPIV3.SchemaObject] };
+    }
+
+    expect(() => typeName(nested)).not.toThrow();
+    expect(typeName(nested)).toMatch(/^oneOf</);
+  });
+
   it('falls back to a count when a union is too wide to read', () => {
     // Twenty distinct member names would spell out past any readable length.
     const wide: OpenAPIV3.SchemaObject = {
